@@ -10,7 +10,9 @@ import mongoose from 'mongoose';
 let connection;
 export function connectDB() {
   if (!connection) {
-    connection = mongoose.connect(process.env.MONGO_URI || 'mongodb://127.0.0.1:27017/booksync')
+    // Tolerate stray whitespace or quotes pasted into the hosting dashboard.
+    const uri = (process.env.MONGO_URI || '').trim().replace(/^["']|["']$/g, '');
+    connection = mongoose.connect(uri || 'mongodb://127.0.0.1:27017/booksync')
       .catch(err => { connection = undefined; throw err; });
   }
   return connection;
