@@ -1,17 +1,22 @@
-import 'dotenv/config';
 import express from 'express';
 import cors from 'cors';
-import http from 'http';
-import { Server } from 'socket.io';
 import Discussion from './models/Discussion.js';
 import Milestone from './models/Milestone.js';
 import Meeting from './models/Meeting.js';
 import Notification from './models/Notification.js';
 import mongoose from 'mongoose';
 
+// Reuse one MongoDB connection across requests (and warm Vercel function invocations).
+let connection;
+export function connectDB() {
+  if (!connection) {
+    connection = mongoose.connect(process.env.MONGO_URI || 'mongodb://127.0.0.1:27017/booksync')
+      .catch(err => { connection = undefined; throw err; });
+  }
+  return connection;
+}
+
 const app = express();
-const server = http.createServer(app);
-const io = new Server(server, { cors: { origin: process.env.CLIENT_URL || 'http://localhost:5173' } });
 app.use(cors({ origin: process.env.CLIENT_URL || 'http://localhost:5173' }));
 app.use(express.json());
 app.get('/api/health', (_req, res) => res.json({ status: 'ok', app: 'BookSync' }));
@@ -68,7 +73,8 @@ app.post('/api/ai/chat', async (req, res) => {
         temperature: 0.7,
         max_tokens: mode === 'questions' ? 900 : 700
       }),
-      signal: AbortSignal.timeout(90000)
+      // Stay under the 60s Vercel function limit set in vercel.json.
+      signal: AbortSignal.timeout(55000)
     });
     const data = await response.json().catch(() => ({}));
     // OpenRouter may return HTTP 200 while reporting a provider/model error in
@@ -129,9 +135,13 @@ app.post('/api/ai/chat', async (req, res) => {
   }
 });
 
+// Every route below needs MongoDB.
+app.use((_req, res, next) => { connectDB().then(() => next(), err => res.status(503).json({ message: `Database connection failed: ${err.message}` })); });
+
 async function notify(type, message, relatedId = '') {
   const item = await Notification.create({ type, message, relatedId });
-  io.emit('notification:new', item);
+  // Socket.IO is only attached by server/index.js (local dev); on Vercel clients poll instead.
+  app.locals.io?.emit('notification:new', item);
   return item;
 }
 
@@ -213,8 +223,5 @@ app.get('/api/notifications/:id', async (req, res) => { try { if (!mongoose.isVa
 app.patch('/api/notifications/:id/read', async (req, res) => { try { const item = await Notification.findByIdAndUpdate(req.params.id, { read: true }, { new: true }); if (!item) return res.status(404).json({ message: 'Notification not found' }); res.json(item); } catch (e) { res.status(400).json({ message: e.message }); } });
 app.delete('/api/notifications/:id', async (req, res) => { try { const item = await Notification.findByIdAndDelete(req.params.id); if (!item) return res.status(404).json({ message: 'Notification not found' }); res.json({ message: 'Notification deleted' }); } catch (e) { res.status(400).json({ message: e.message }); } });
 
-io.on('connection', socket => { console.log(`Client connected: ${socket.id}`); });
-const PORT = process.env.PORT || 5000;
-mongoose.connect(process.env.MONGO_URI || 'mongodb://127.0.0.1:27017/booksync')
-  .then(() => server.listen(PORT, () => console.log(`BookSync API running on http://localhost:${PORT}`)))
-  .catch(err => { console.error('MongoDB connection failed:', err.message); process.exit(1); });
+
+export default app;

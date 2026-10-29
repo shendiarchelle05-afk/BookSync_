@@ -2,8 +2,12 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { io } from 'socket.io-client';
 import { BookOpen, LayoutDashboard, MessageSquareText, BookmarkCheck, CalendarDays, Bell, Search, Plus, Pencil, Trash2, X, ArrowUpRight, Clock3, Check, Menu, BrainCircuit, Sparkles, Send, RefreshCw } from 'lucide-react';
 
-const API = import.meta.env.VITE_API_URL || 'http://localhost:5000/api';
-const socket = io(import.meta.env.VITE_SOCKET_URL || 'http://localhost:5000', { autoConnect: true });
+// In production (Vercel) the API is served from the same domain under /api.
+const API = import.meta.env.VITE_API_URL || (import.meta.env.DEV ? 'http://localhost:5000/api' : '/api');
+// Vercel functions can't hold WebSockets, so without a socket server we poll for notifications.
+const SOCKET_URL = import.meta.env.VITE_SOCKET_URL || (import.meta.env.DEV ? 'http://localhost:5000' : '');
+const socket = SOCKET_URL ? io(SOCKET_URL, { autoConnect: true }) : null;
+const POLL_MS = 10000;
 const blankDiscussion = { title: '', bookTitle: '', authorName: 'Book Club Member', content: '', tags: '' };
 const blankMilestone = { bookTitle: '', chapterNumber: 1, totalChapters: 20, note: '', completedAt: new Date().toISOString().slice(0, 10) };
 const blankMeeting = { title: '', bookTitle: '', description: '', meetingAt: '', location: 'Online', reminderMinutes: 30 };
@@ -29,7 +33,23 @@ export default function App() {
       setDashboard(d); setDiscussions(ds); setMilestones(ms); setMeetings(mt); setNotifications(ns);
     } catch (e) { flash(`${e.message}. Check that the API and MongoDB are running.`); }
   }
-  useEffect(() => { loadAll(); const onNew = item => { setNotifications(old => [item, ...old.filter(n => n._id !== item._id)]); flash(item.message); loadAll(); }; socket.on('notification:new', onNew); return () => socket.off('notification:new', onNew); }, []);
+  useEffect(() => {
+    loadAll();
+    const onNew = item => { setNotifications(old => [item, ...old.filter(n => n._id !== item._id)]); flash(item.message); loadAll(); };
+    if (socket) { socket.on('notification:new', onNew); return () => socket.off('notification:new', onNew); }
+    let latest = null;
+    const poll = async () => {
+      try {
+        const items = await request('/notifications');
+        const newest = items[0]?._id || '';
+        if (latest !== null && newest && newest !== latest) onNew(items[0]);
+        latest = newest;
+      } catch { /* loadAll already reports connection problems */ }
+    };
+    poll();
+    const timer = window.setInterval(poll, POLL_MS);
+    return () => window.clearInterval(timer);
+  }, []);
   const nav = [{ name: 'Dashboard', icon: LayoutDashboard }, { name: 'Discussions', icon: MessageSquareText }, { name: 'AI Assistant', icon: BrainCircuit }, { name: 'Milestones', icon: BookmarkCheck }, { name: 'Meetings', icon: CalendarDays }, { name: 'Notifications', icon: Bell }];
   const unread = notifications.filter(n => !n.read).length;
   const filteredDiscussions = useMemo(() => discussions.filter(d => `${d.title} ${d.bookTitle} ${d.content} ${d.authorName}`.toLowerCase().includes(search.toLowerCase())), [discussions, search]);

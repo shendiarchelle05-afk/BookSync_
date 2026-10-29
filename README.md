@@ -98,6 +98,17 @@ The assistant provides **Ask a question**, **Generate questions**, and **Explain
 
 The server only starts listening after the MongoDB connection succeeds. If MongoDB is unavailable, the server prints a connection error instead of silently running disconnected.
 
+## Deploy to Vercel
+
+The whole app (React client + Express API) deploys as one Vercel project. `vercel.json` builds the client into `client/dist` and serves the API from `api/index.js` (which wraps `server/app.js`) under `/api`.
+
+1. Create a free MongoDB Atlas cluster, add a database user, and allow network access from `0.0.0.0/0` (Vercel has no fixed IPs).
+2. Import the GitHub repo in Vercel. Leave the root directory as the repo root; the build settings come from `vercel.json`.
+3. Add environment variables: `MONGO_URI` (Atlas connection string), `OPENROUTER_API_KEY`, and optionally `OPENROUTER_MODEL`. Do **not** set `VITE_API_URL` or `VITE_SOCKET_URL`.
+4. Deploy, then optionally seed Atlas from your machine: set `MONGO_URI` in `server/.env` to the Atlas string and run `npm run seed`.
+
+Vercel functions cannot keep WebSocket connections open, so in production the client polls `/api/notifications` every 10 seconds instead of using Socket.IO. Local development still uses Socket.IO.
+
 ## API endpoints
 
 - `GET /api/health`, `GET /api/dashboard`
