@@ -216,5 +216,9 @@ app.delete('/api/notifications/:id', async (req, res) => { try { const item = aw
 io.on('connection', socket => { console.log(`Client connected: ${socket.id}`); });
 const PORT = process.env.PORT || 5000;
 mongoose.connect(process.env.MONGO_URI || 'mongodb://127.0.0.1:27017/booksync')
-  .then(() => server.listen(PORT, () => console.log(`BookSync API running on http://localhost:${PORT}`)))
+  .then(() => {
+  server.listen(PORT, "0.0.0.0", () => {
+    console.log(`BookSync API running on port ${PORT}`);
+  });
+})
   .catch(err => { console.error('MongoDB connection failed:', err.message); process.exit(1); });
